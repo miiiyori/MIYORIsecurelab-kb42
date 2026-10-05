@@ -109,3 +109,31 @@ filterForm.addEventListener("submit", (event) => {
 });
 
 loadIncidents();
+
+const summaryButton = document.querySelector("#summary-button");
+const summaryStatsElement = document.querySelector("#summary-status");
+const summaryListElement = document.querySelector("#summary-list");
+
+async function loadSeveritySummary() {
+    summaryStatsElement.textContent = "Завантаження…";
+    summaryListElement.replaceChildren();
+
+    try {
+        const summary = await apiFetch ("/api/incidents/severity-summary");
+        
+        if (summary.length === 0) {
+            summaryStatsElement.textContent = "Даних немає";
+            return;
+        }
+        summaryStatsElement.textContent = "";
+        for (const item of summary) {
+            const listItem = document.createElement("li");
+            listItem.textContent = `${item.severity}: ${item.count}`;
+            summaryListElement.append(listItem);
+        }
+    }
+    catch (Error) {
+    summaryStatsElement.textContent = "Не вдалося завантажити підсумок. Спробуйте пізніше";
+    }
+}
+summaryButton.addEventListener("click", loadSeveritySummary); 
