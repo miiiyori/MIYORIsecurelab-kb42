@@ -1,8 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
-using System.ComponentModel;
-using System.Data.SqlTypes;
+
 
 namespace SecureLab.Api.Scaffolding;
 
@@ -76,11 +75,11 @@ public static class Lab02Endpoints
             var description = request.Description?.Trim() ?? "";
 
             // T-09: опис для High/Critical від 40 символів
-            if ((severity == IncidentSeverity.High
-                || severity==IncidentSeverity.Critical)
-                && description.Length < 40) {
-            errors["description"] = ["Для високого та критичного рівня опис має містити щонайменше 40 символів"];
-            }
+            if (severityIsValid
+            && (severity == IncidentSeverity.High || severity == IncidentSeverity.Critical)
+            && !errors.ContainsKey("description")
+            && description.Length < 40)
+                errors["description"] = ["Для високого та критичного рівня опис має містити щонайменше 40 символів"];
 
             // усі помилки контракту - відповідь 400, до БД
             if (errors.Count > 0)
@@ -115,7 +114,7 @@ public static class Lab02Endpoints
             var response = new CreatedIncidentResponse(
                 incident.Id, incident.Title, incident.Severity.ToString(),
                 incident.Status.ToString(), incident.OccurredAtUtc, incident.CreatedAtUtc);
-            return Results.Created($"/api/incidents/{incident.Id}", new { incident.Id, incident.Title });
+            return Results.Created($"/api/incidents/{incident.Id}", response);
         });
     }
 }
