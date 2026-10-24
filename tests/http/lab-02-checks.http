@@ -1,0 +1,47 @@
+@api = http://localhost:5080
+### USB — перевірка встановлення
+GET {{api}}/api/incidents/search?q=USB
+### T-06: ресурс не знайдено
+GET {{api}}/api/incidents/99999999-9999-9999-9999-999999999999
+
+### коректне створення (201)
+POST {{api}}/api/incidents
+content-type: application/json
+
+{"title":"Новий інцидент", "description":"Опис для перевірки створення запису","severity":"Low","occurredAtUtc":"2026-10-01T10:00:00Z"}
+
+### некоректне severity (400)
+POST {{api}}/api/incidents
+content-type: application/json
+
+{"title":"Перевірка рівня","description":"Звичайний опис інциденту","severity":"7","occurredAtUtc":"2026-10-01T10:00:00Z"}
+
+### немає дати (400)
+POST {{api}}/api/incidents
+content-type: application/json
+
+{"title":"Перевірка дати","description":"Перевірка без зазначеної дати","severity":"Low"}
+
+### дата в майбутньому (400)
+POST {{api}}/api/incidents
+content-type: application/json
+
+{"title":"Дата в майбутньому","description":"Перевірка дати, яка ще не настала","severity":"Low","occurredAtUtc":"2099-01-01T00:00:00Z"}
+
+### T-09: опис 39 символів (400)
+POST {{api}}/api/incidents
+content-type: application/json
+
+{"title":"Тест 39 символів","description":"ДляДаногоТестуТутУНасНаписано39Символів","severity":"High","occurredAtUtc":"2026-10-01T10:00:00Z"}
+
+### T-09: опис 40 символів (201)
+POST {{api}}/api/incidents
+content-type: application/json
+
+{"title":"Тест 40 символів","description":"ДляДаногоТестуВикористано40СимволівОпису","severity":"High","occurredAtUtc":"2026-10-01T10:00:00Z"}
+
+### T-03: перевірка однакових назв (409)
+POST {{api}}/api/incidents
+content-type: application/json
+
+{"title":"Новий інцидент","description":"Повторна перевірка створення запису","severity":"Low","occurredAtUtc":"2026-10-01T10:00:00Z"}
