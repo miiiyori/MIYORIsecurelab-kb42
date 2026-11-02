@@ -8,6 +8,8 @@ using SecureLab.Api.Data;
 namespace SecureLab.Api.Tests;
 public sealed class CreateIncidentTests(SecureLabApiFactory factory) : IClassFixture<SecureLabApiFactory>
 {
+    private static string StudyPassword => Environment.GetEnvironmentVariable("SeedUsers__Password") ?? throw new
+    InvalidOperationException("Set local SeedUsers__Password outside Git.");
     // Т-02: некоректний рівень северіті -> помилка 400 і правильний формат відповіді
     [Fact]
     public async Task Post_InvalidSeverity_Returns400_T02()
@@ -23,7 +25,7 @@ public sealed class CreateIncidentTests(SecureLabApiFactory factory) : IClassFix
 
         try
         {
-            using var client = factory.CreateClient();
+            using var client = await factory.LoginAsync("alice", StudyPassword);
             using var response = await client.PostAsJsonAsync("/api/incidents", body);
 
             // перевіряємо статус і тип контенту
@@ -58,7 +60,7 @@ public sealed class CreateIncidentTests(SecureLabApiFactory factory) : IClassFix
         };
         try
         {
-            using var client = factory.CreateClient();
+            using var client = await factory.LoginAsync("alice", StudyPassword);
             // перший запит має пройти успішно
             using var first = await client.PostAsJsonAsync("/api/incidents", body);
             Assert.Equal(HttpStatusCode.Created, first.StatusCode);
