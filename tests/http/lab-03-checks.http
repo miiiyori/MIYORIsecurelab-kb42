@@ -1,0 +1,8 @@
+@api = http://localhost:5080
+
+### step 1: /api/me header without login (expect 401)
+GET {{api}}/api/me
+
+### step 4: foreign header without cookie (expect 401)
+GET {{api}}/api/me
+X-Demo-UserId: 10000000-0000-0000-0000-000000000002
