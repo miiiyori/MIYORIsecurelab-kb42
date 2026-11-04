@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
-
+using System.Security.Claims;
 
 namespace SecureLab.Api.Scaffolding;
 
@@ -57,6 +57,7 @@ public static class Lab02Endpoints
 
         app.MapPost("/api/incidents", async (
             CreateIncidentRequest request,
+            HttpContext httpContext,
             SecureLabDbContext db,
             CancellationToken ct) =>
         {
@@ -111,11 +112,16 @@ public static class Lab02Endpoints
                     title: "Інцидент уже існує",
                     detail: "Активний інцидент з такою назвою уже створено");
 
+            // власник береться лише з кукі, а не тіла запиту 
+            var ownerIdText = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!Guid.TryParse(ownerIdText, out var ownerId))
+                return Results.Unauthorized();
+
             // entity, лише сервер задає службові поля
             var incident = new Incident
             {
                 Id = Guid.NewGuid(),
-                OwnerUserId = DbSeeder.AliceId,
+                OwnerUserId = ownerId,
                 Title = title,
                 Description = description,
                 Severity = severity,
@@ -132,7 +138,7 @@ public static class Lab02Endpoints
                 incident.Id, incident.Title, incident.Severity.ToString(),
                 incident.Status.ToString(), incident.OccurredAtUtc, incident.CreatedAtUtc);
             return Results.Created($"/api/incidents/{incident.Id}", response);
-        });
+        }).RequireAuthorization();
     }
     // екрануємо спецсимволи postgresql слеш/підкреслення/відсоток, щоб вони шукалися як звичайні букви 
     private static string EscapeLike(string value) => value.Replace("\\", "\\\\").Replace("_", "\\_").Replace("%", "\\%");
