@@ -6,3 +6,9 @@ GET {{api}}/api/me
 ### step 4: foreign header without cookie (expect 401)
 GET {{api}}/api/me
 X-Demo-UserId: 10000000-0000-0000-0000-000000000002
+
+### create without login (expect 401)
+POST {{api}}/api/incidents
+content-type: application/json
+
+{"title":"anon check","description":"Anonymous create must be rejected by the server","severity":"Low","occurredAtUtc":"2026-10-01T10:00:00Z"}
