@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 using System.Security.Claims;
-
+using System.Threading.RateLimiting;
 namespace SecureLab.Api.Scaffolding;
 
 public static class Lab03Identity
@@ -32,10 +32,26 @@ public static class Lab03Identity
                 return Task.CompletedTask;
             };
         });
+        // обмеження повторних спроб входу: ключем є ІР, даємо 10 спроб на 10 секунд
+        builder.Services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.AddPolicy("login", httpContext =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    factory: _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromSeconds(10),
+                        QueueLimit = 0
+                    }));
+        });
     }
 
     public static void MapLab03Identity(this WebApplication app)
     {
+        // обов'язково вмикаємо middleware для rate limiter на початку 
+        app.UseRateLimiter();
         app.MapPost("/api/auth/register", async (RegistrationInput input, UserManager<ApplicationUser> users) =>
         {
             // усі поля обов'язкові, пароль лише перевіряємо, щоб не був порожній 
@@ -71,13 +87,21 @@ public static class Lab03Identity
             var response = new RegisterResponse(user.Id, user.UserName, user.DisplayName);
             return Results.Created("/api/me", response);
         });
-        app.MapPost("/api/auth/login", async (LoginInput input, SignInManager<ApplicationUser> signIn) =>
+        app.MapPost("/api/auth/login", async (LoginInput input, SignInManager<ApplicationUser> signIn, HttpContext httpContext, ILogger<LoginInput> logger) =>
         {
             if (string.IsNullOrWhiteSpace(input.UserName) || string.IsNullOrEmpty(input.Password))
+            {
+                // логуємо провал через пусті поля 
+                logger.LogInformation("Auth event {EventType}: result {Result}, trace {TraceId}",
+                    "login", "rejected-empty", httpContext.TraceIdentifier);
                 return Results.Unauthorized();
+            }
             var result = await signIn.PasswordSignInAsync(input.UserName, input.Password, false, false);
+            // пишемо подію в журнал (success або failure), юзернейм навмисно не логуємо, бо можливо він випадково був введений у поле логіна 
+            // тому логування імені може призвести до зливу паролів у відкритому вигляді
+            logger.LogInformation("Auth event {EventType}: result {Result}, trace {TraceId}", "login", result.Succeeded ? "success" : "failure", httpContext.TraceIdentifier);
             return result.Succeeded ? Results.NoContent() : Results.Unauthorized();
-        });
+        }).RequireRateLimiting("login"); // прив'язуєм політику лімітів
         // замінюємо заглушку 501 на Вихід 
         app.MapPost("/api/auth/logout", async (SignInManager<ApplicationUser> signIn) =>
         {
