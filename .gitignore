@@ -25,3 +25,7 @@ appsettings.Local.json
 *.sql.gz
 *.log
 
+
+lr04-resourses/
+
+lr04-resources/
