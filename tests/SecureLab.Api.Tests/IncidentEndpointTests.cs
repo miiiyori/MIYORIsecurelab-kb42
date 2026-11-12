@@ -21,9 +21,8 @@ public sealed class IncidentEndpointTests(SecureLabApiFactory factory)
         factory.LoginAsync(userName, SeedPassword);
 
     [Fact]
-    public async Task GetList_ReturnsSeededIncidents()
+    public async Task GetList_AsReporter_ReturnsOnlyOwnIncidents()
     {
-        // список поки не обмежений, тест перепишу, коли дійдемо до scoping
         using var alice = await LoginAsync("alice");
 
         var incidents = await alice.GetFromJsonAsync<List<IncidentListItemResponse>>(
@@ -31,6 +30,28 @@ public sealed class IncidentEndpointTests(SecureLabApiFactory factory)
 
         Assert.NotNull(incidents);
         Assert.Contains(incidents, incident => incident.Id == DbSeeder.AliceIncidentId);
+        Assert.DoesNotContain(incidents, incident => incident.Id == DbSeeder.BobIncidentId);
+    }
+
+    [Fact]
+    public async Task GetList_AsAnalyst_ReturnsIncidentsOfAllOwners()
+    {
+        using var morgan = await LoginAsync("morgan");
+
+        var incidents = await morgan.GetFromJsonAsync<List<IncidentListItemResponse>>(
+            "/api/incidents");
+
+        Assert.NotNull(incidents);
+        Assert.Contains(incidents, incident => incident.Id == DbSeeder.AliceIncidentId);
+        Assert.Contains(incidents, incident => incident.Id == DbSeeder.BobIncidentId);
+    }
+
+    [Fact]
+    public async Task GetList_AsAdministrator_Returns403()
+    {
+        using var admin = await LoginAsync("admin");
+        using var response = await admin.GetAsync("/api/incidents");
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
     [Fact]

@@ -8,12 +8,19 @@ namespace SecureLab.Api.Application.Incidents;
 public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<IncidentQueries> logger)
 {
     public async Task<IReadOnlyList<IncidentListItemResponse>> GetListAsync(
-        IncidentStatus? status,
-        CancellationToken cancellationToken)
+    IncidentStatus? status,
+    Guid ownerId,
+    bool seeAll,
+    CancellationToken cancellationToken)
     {
         logger.LogInformation("Loading incidents with status filter {Status}", status);
-
         var query = dbContext.Incidents.AsNoTracking();
+        // обмеження входить прямо в запит, чужі рядки з бази навіть не читаються
+        if (!seeAll)
+        {
+            query = query.Where(incident => incident.OwnerUserId == ownerId);
+        }
+
         if (status is not null)
         {
             query = query.Where(incident => incident.Status == status);
@@ -30,7 +37,6 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
                 incident.CreatedAtUtc))
             .ToListAsync(cancellationToken);
     }
-
     // Entity для рішення авторизації (потрібен OwnerUserId), без проєкції
     public Task<Incident?> FindAsync(Guid id, CancellationToken cancellationToken) =>
         dbContext.Incidents

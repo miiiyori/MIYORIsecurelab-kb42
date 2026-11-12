@@ -3,6 +3,7 @@ using SecureLab.Api.Application.Incidents;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 using SecureLab.Api.Presentation.Contracts;
+using System.Security.Claims;
 
 namespace SecureLab.Api.Presentation.Endpoints;
 
@@ -35,6 +36,7 @@ public static class IncidentEndpoints
 
     private static async Task<IResult> GetListAsync(
         string? status,
+        HttpContext httpContext,
         IncidentQueries queries,
         CancellationToken cancellationToken)
     {
@@ -49,11 +51,20 @@ public static class IncidentEndpoints
                     ["status"] = ["Допустимі значення: New, Triaged, InProgress, Resolved, Closed."]
                 });
             }
-
             parsedStatus = candidate;
         }
-
-        return Results.Ok(await queries.GetListAsync(parsedStatus, cancellationToken));
+        var userIdValue = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdValue, out var ownerId))
+        {
+            return Results.Challenge();
+        }
+        // адміністратор у матриці не має права на список
+        if (httpContext.User.IsInRole(DbSeeder.AdministratorRole))
+        {
+            return Results.Forbid();
+        }
+        var seeAll = httpContext.User.IsInRole(DbSeeder.AnalystRole);
+        return Results.Ok(await queries.GetListAsync(parsedStatus, ownerId, seeAll, cancellationToken));
     }
 
     private static async Task<IResult> GetDetailsAsync(
