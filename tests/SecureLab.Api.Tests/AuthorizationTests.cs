@@ -122,7 +122,7 @@ public sealed class AuthorizationTests(SecureLabApiFactory factory) : IClassFixt
     public async Task A07_UnknowUserAndWrongPassword_ReturnSameExternalResult()
     {
         using var anonymous = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-        using var wrongUserResponse = await anonymous.PostAsJsonAsync("/api/auth/login", new { userName = "unknown_user", password = StudyPassword });
+        using var wrongUserResponse = await anonymous.PostAsJsonAsync("/api/auth/login", new { userName = "unknown_user", password = "Synthetic-Unknown-1!" });
         using var wrongPassResponse = await anonymous.PostAsJsonAsync("/api/auth/login", new { userName = "alice", password = "WrongPassword1!" });
         Assert.Equal(HttpStatusCode.Unauthorized, wrongUserResponse.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, wrongPassResponse.StatusCode);
@@ -131,6 +131,25 @@ public sealed class AuthorizationTests(SecureLabApiFactory factory) : IClassFixt
         // traceId різний для кожного запиту, тому прибираємо його перед порівнянням
         Assert.Equal(StripTraceId(jsonUser), StripTraceId(jsonPass));
         Assert.Equal(wrongUserResponse.Content.Headers.ContentType?.MediaType, wrongPassResponse.Content.Headers.ContentType?.MediaType);
+    }
+
+    // асінк
+    [Fact]
+    public async Task LoginFailure_DoesNotReflectInput_AndSetsNoCookie()
+    {
+        const string ghostPassword = "Synthetic-Reflection-77!";
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        { AllowAutoRedirect = false, HandleCookies = false });
+        using var response = await client.PostAsJsonAsync("/api/auth/login",
+            new { userName = "ghost-d18", password = ghostPassword });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode); // статус ще не доказ
+        var body = await response.Content.ReadAsStringAsync();          // лише в пам'ять, не друкуємо
+        var leaked = body.Contains(ghostPassword, StringComparison.Ordinal);
+        var names = string.IsNullOrWhiteSpace(body) ? new HashSet<string>() : JsonDocument.Parse(body).RootElement.EnumerateObject().Select(p => p.Name).ToHashSet();
+        var allowed = new HashSet<string> { "type", "title", "status", "traceId" };
+        Assert.True(!leaked && names.SetEquals(allowed), "Login failure body is not safe");
+        Assert.False(response.Headers.Contains("Set-Cookie"));
     }
     private static string StripTraceId(string json) => Regex.Replace(json, "\"traceId\"\\s*:\\s*\"[^\"]*\"", "");
 }
