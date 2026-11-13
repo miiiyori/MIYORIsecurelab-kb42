@@ -31,15 +31,24 @@ public static class IncidentEndpoints
             .WithName("GetIncidentSeveritySummary")
             .Produces<IReadOnlyList<IncidentSeveritySummaryResponse>>()
             .ProducesValidationProblem();
+
         group.MapPut("/{id:guid}", UpdateAsync)
-    .WithName("UpdateIncident")
-    .ProducesValidationProblem()
-    .ProducesProblem(StatusCodes.Status403Forbidden)
-    .ProducesProblem(StatusCodes.Status404NotFound);
+            .WithName("UpdateIncident")
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapDelete("/{id:guid}", DeleteAsync)
             .WithName("DeleteIncident")
             .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        var commentsGroup = endpoints.MapGroup("/api/incident-comments")
+            .WithTags("Incident Comments")
+            .RequireAuthorization();
+
+        commentsGroup.MapGet("/{id:guid}", GetCommentAsync)
+            .WithName("GetIncidentComment")
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         return endpoints;
@@ -234,5 +243,47 @@ public static class IncidentEndpoints
         db.Incidents.Remove(incident);
         await db.SaveChangesAsync(cancellationToken);
         return Results.NoContent();
+    }
+    private static async Task<IResult> GetCommentAsync(
+    Guid id,
+    HttpContext httpContext,
+    IAuthorizationService authorizationService,
+    SecureLabDbContext db,
+    CancellationToken cancellationToken)
+    {
+        // завантажуємо коментар разом із батьківським інцидентом та автором
+        var comment = await db.IncidentComments
+            .Include(c => c.Incident)
+            .Include(c => c.Author)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(c => c.Id == id, cancellationToken);
+
+        if (comment is null)
+        {
+            return Results.Problem(title: "Коментар не знайдено", statusCode: StatusCodes.Status404NotFound);
+        }
+
+        // 1. спочатку перевіряємо, чи має користувач доступ до БАТЬКІВСЬКОГО інциденту
+        var parentDecision = await authorizationService.AuthorizeAsync(
+            httpContext.User, comment.Incident, IncidentOperations.Read);
+
+        if (!parentDecision.Succeeded)
+        {
+            return Results.Problem(title: "Коментар не знайдено", statusCode: StatusCodes.Status404NotFound);
+        }
+
+        // 2. якщо коментар внутрішній, його може бачити ТІЛЬКИ аналітик
+        if (comment.IsInternal && !httpContext.User.IsInRole(DbSeeder.AnalystRole))
+        {
+            return Results.Problem(title: "Коментар не знайдено", statusCode: StatusCodes.Status404NotFound);
+        }
+
+        var response = new IncidentCommentResponse(
+            comment.Id,
+            comment.Author.DisplayName,
+            comment.Text,
+            comment.CreatedAtUtc);
+
+        return Results.Ok(response);
     }
 }
