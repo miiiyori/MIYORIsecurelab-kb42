@@ -57,6 +57,7 @@ public static class IncidentEndpoints
 
         commentsGroup.MapGet("/{id:guid}", GetCommentAsync)
             .WithName("GetIncidentComment")
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         return endpoints;
@@ -253,13 +254,12 @@ public static class IncidentEndpoints
         return Results.NoContent();
     }
     private static async Task<IResult> GetCommentAsync(
-    Guid id,
-    HttpContext httpContext,
-    IAuthorizationService authorizationService,
-    SecureLabDbContext db,
-    CancellationToken cancellationToken)
+        Guid id,
+        HttpContext httpContext,
+        IAuthorizationService authorizationService,
+        SecureLabDbContext db,
+        CancellationToken cancellationToken)
     {
-        // завантажуємо коментар разом із батьківським інцидентом та автором
         var comment = await db.IncidentComments
             .Include(c => c.Incident)
             .Include(c => c.Author)
@@ -271,51 +271,50 @@ public static class IncidentEndpoints
             return Results.Problem(title: "Коментар не знайдено", statusCode: StatusCodes.Status404NotFound);
         }
 
-        // 1. спочатку перевіряємо, чи має користувач доступ до БАТЬКІВСЬКОГО інциденту
+        // доступ до коментаря залежить від доступу до батьківського інциденту
         var parentDecision = await authorizationService.AuthorizeAsync(
             httpContext.User, comment.Incident, IncidentOperations.Read);
-
         if (!parentDecision.Succeeded)
         {
-            return Results.Problem(title: "Коментар не знайдено", statusCode: StatusCodes.Status404NotFound);
+            return Results.Forbid();
         }
 
-        // 2. якщо коментар внутрішній, його може бачити ТІЛЬКИ аналітик
+        // internal бачить лише аналітик, навіть власник інциденту ні
         if (comment.IsInternal && !httpContext.User.IsInRole(DbSeeder.AnalystRole))
         {
-            return Results.Problem(title: "Коментар не знайдено", statusCode: StatusCodes.Status404NotFound);
+            return Results.Forbid();
         }
 
-        var response = new IncidentCommentResponse(
+        return Results.Ok(new IncidentCommentResponse(
             comment.Id,
             comment.Author.DisplayName,
             comment.Text,
-            comment.CreatedAtUtc);
-
-        return Results.Ok(response);
+            comment.CreatedAtUtc));
     }
     private static async Task<IResult> TriageAsync(
         Guid id,
         TriageIncidentRequest request,
         HttpContext httpContext,
+        IAuthorizationService authorizationService,
         SecureLabDbContext db,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
         var logger = loggerFactory.CreateLogger("IncidentEndpoints");
 
+        // без AsNoTracking, бо ресурс змінюємо
         var incident = await db.Incidents
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
-
         if (incident is null)
         {
             return Results.Problem(title: "Інцидент не знайдено", statusCode: StatusCodes.Status404NotFound);
         }
 
-        // ПЕРЕВІРКА ПРАВ: тільки аналітик
-        if (!httpContext.User.IsInRole(DbSeeder.AnalystRole))
+        var decision = await authorizationService.AuthorizeAsync(
+            httpContext.User, incident, IncidentOperations.Triage);
+        if (!decision.Succeeded)
         {
-            // А-09, запис безпечного аудити при відмові
+            // у подію не кладемо ні cookie, ні тіло запиту, лише службові поля
             logger.LogWarning(
                 "authorization.denied subject={SubjectId} action={Action} resource={ResourceId} result={Result} occurredAtUtc={OccurredAtUtc:O} traceId={TraceId}",
                 httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier),
@@ -328,7 +327,6 @@ public static class IncidentEndpoints
             return Results.Forbid();
         }
 
-        // ПЕРЕВІРКА СТАНУ: тільки New -> Triaged
         if (incident.Status != IncidentStatus.New)
         {
             return Results.Problem(
@@ -337,10 +335,19 @@ public static class IncidentEndpoints
                 statusCode: StatusCodes.Status409Conflict);
         }
 
-        var now = DateTimeOffset.UtcNow;
-        var note = string.IsNullOrWhiteSpace(request.Note) ? "Первинну оцінку завершено." : request.Note.Trim();
+        var note = string.IsNullOrWhiteSpace(request.Note)
+            ? "Первинну оцінку завершено."
+            : request.Note.Trim();
+        if (note.Length > 500)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["note"] = ["Нотатка не може перевищувати 500 символів"]
+            });
+        }
 
-        var history = new IncidentStatusHistory
+        var now = DateTimeOffset.UtcNow;
+        db.IncidentStatusHistory.Add(new IncidentStatusHistory
         {
             Id = Guid.NewGuid(),
             IncidentId = incident.Id,
@@ -349,14 +356,13 @@ public static class IncidentEndpoints
             NewStatus = IncidentStatus.Triaged,
             Note = note,
             CreatedAtUtc = now
-        };
+        });
 
+        // новий статус ставить сервер, клієнт його не передає
         incident.Status = IncidentStatus.Triaged;
         incident.UpdatedAtUtc = now;
 
-        db.IncidentStatusHistory.Add(history);
         await db.SaveChangesAsync(cancellationToken);
-
         return Results.NoContent();
     }
 }

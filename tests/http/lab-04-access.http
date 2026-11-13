@@ -35,3 +35,17 @@ Content-Type: application/json
 ### Permitted Analyst read
 GET {{host}}/api/incidents/{{aliceId}}
 Accept: application/json
+
+### Alice login again (just to be sure we act as Reporter)
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{ "userName": "alice", "password": "{{$processEnv SeedUsers__Password}}" }
+
+### Alice (Reporter) tries to Triage her incident
+POST {{host}}/api/incidents/{{aliceId}}/triage
+Content-Type: application/json
+
+{ 
+    "note": "Спроба Аліси перевести інцидент у Triaged" 
+}

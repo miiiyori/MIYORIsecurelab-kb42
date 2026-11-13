@@ -1,4 +1,4 @@
 namespace SecureLab.Api.Presentation.Contracts;
 
-//DTO для зміни статусу містить лише нотатку, статус визначає сервер
-public sealed record TriageIncidentRequest(string Note);
+// клієнт передає лише текст нотатки, статус визначає сервер
+public sealed record TriageIncidentRequest(string? Note);

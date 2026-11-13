@@ -67,4 +67,34 @@ public sealed class IncidentTriageTests(SecureLabApiFactory factory) : IClassFix
             await alice.DeleteAsync($"/api/incidents/{id}");
         }
     }
+    [Fact]
+    public async Task Triage_Anonymous_Returns401()
+    {
+        using var anonymous = factory.CreateClient();
+
+        using var response = await anonymous.PostAsJsonAsync(
+            $"/api/incidents/{Guid.NewGuid()}/triage", new { note = "x" });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Triage_WhenAlreadyTriaged_Returns409()
+    {
+        using var alice = await factory.LoginAsync("alice", SeedPassword);
+        using var morgan = await factory.LoginAsync("morgan", SeedPassword);
+        var id = await CreateNewIncidentAsync(alice);
+        try
+        {
+            using var first = await morgan.PostAsJsonAsync($"/api/incidents/{id}/triage", new { note = "перший" });
+            using var second = await morgan.PostAsJsonAsync($"/api/incidents/{id}/triage", new { note = "другий" });
+
+            Assert.Equal(HttpStatusCode.NoContent, first.StatusCode);
+            Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+        }
+        finally
+        {
+            await alice.DeleteAsync($"/api/incidents/{id}");
+        }
+    }
 }
