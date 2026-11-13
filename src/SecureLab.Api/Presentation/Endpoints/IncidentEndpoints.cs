@@ -4,6 +4,7 @@ using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 using SecureLab.Api.Presentation.Contracts;
 using System.Security.Claims;
+using Microsoft.EntityFrameworkCore;
 
 namespace SecureLab.Api.Presentation.Endpoints;
 
@@ -30,6 +31,16 @@ public static class IncidentEndpoints
             .WithName("GetIncidentSeveritySummary")
             .Produces<IReadOnlyList<IncidentSeveritySummaryResponse>>()
             .ProducesValidationProblem();
+        group.MapPut("/{id:guid}", UpdateAsync)
+    .WithName("UpdateIncident")
+    .ProducesValidationProblem()
+    .ProducesProblem(StatusCodes.Status403Forbidden)
+    .ProducesProblem(StatusCodes.Status404NotFound);
+
+        group.MapDelete("/{id:guid}", DeleteAsync)
+            .WithName("DeleteIncident")
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         return endpoints;
     }
@@ -119,5 +130,109 @@ public static class IncidentEndpoints
         }
 
         return Results.Ok(await queries.GetSeveritySummaryAsync(parsedStatus, cancellationToken));
+    }
+
+    private static async Task<IResult> UpdateAsync(
+        Guid id, 
+        UpdateIncidentRequest request, 
+        HttpContext httpContext, 
+        IAuthorizationService authorizationService, 
+        SecureLabDbContext db, 
+        CancellationToken cancellationToken)
+    {
+        // без AsNoTracking, інакше SaveChanges нічого не запише
+        var incident = await db.Incidents
+            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (incident is null)
+        {
+            return Results.Problem(
+                title: "Інцидент не знайдено",
+                detail: $"Інцидент '{id}' не існує.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        // спочатку право, і лише потім валідація та зміна
+        var decision = await authorizationService.AuthorizeAsync(
+            httpContext.User, incident, IncidentOperations.Update);
+        if (!decision.Succeeded)
+        {
+            return Results.Forbid();
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var errors = new Dictionary<string, string[]>();
+
+        var title = request.Title?.Trim() ?? "";
+        var description = request.Description?.Trim() ?? "";
+
+        if (title.Length == 0)
+            errors["title"] = ["Назва обов'язкова"];
+        else if (title.Length > 160)
+            errors["title"] = ["Назва не може перевищувати 160 символів"];
+
+        if (description.Length == 0)
+            errors["description"] = ["Опис обов'язковий"];
+        else if (description.Length > 4000)
+            errors["description"] = ["Опис не може перевищувати 4000 символів"];
+
+        var severityIsValid = Enum.TryParse<IncidentSeverity>(request.Severity, ignoreCase: true, out var severity)
+            && Enum.IsDefined(severity);
+        if (!severityIsValid)
+            errors["severity"] = ["Допустимі значення: Low, Medium, High, Critical"];
+
+        if (request.OccurredAtUtc is null)
+            errors["occurredAtUtc"] = ["Дата події обов'язкова"];
+        else if (request.OccurredAtUtc.Value > now.AddMinutes(5))
+            errors["occurredAtUtc"] = ["Дата не може бути більш ніж на 5 хвилин у майбутньому"];
+
+        if (severityIsValid
+            && (severity == IncidentSeverity.High || severity == IncidentSeverity.Critical)
+            && !errors.ContainsKey("description")
+            && description.Length < 40)
+            errors["description"] = ["Для високого та критичного рівня опис має містити щонайменше 40 символів"];
+
+        if (errors.Count > 0)
+        {
+            return Results.ValidationProblem(errors);
+        }
+
+        // owner, status і id не чіпаємо, їх у запиті просто немає
+        incident.Title = title;
+        incident.Description = description;
+        incident.Severity = severity;
+        incident.OccurredAtUtc = request.OccurredAtUtc!.Value.ToUniversalTime();
+        incident.UpdatedAtUtc = now;
+
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> DeleteAsync(
+        Guid id,
+        HttpContext httpContext,
+        IAuthorizationService authorizationService,
+        SecureLabDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var incident = await db.Incidents
+            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (incident is null)
+        {
+            return Results.Problem(
+                title: "Інцидент не знайдено",
+                detail: $"Інцидент '{id}' не існує.",
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        var decision = await authorizationService.AuthorizeAsync(
+            httpContext.User, incident, IncidentOperations.Delete);
+        if (!decision.Succeeded)
+        {
+            return Results.Forbid();
+        }
+
+        db.Incidents.Remove(incident);
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.NoContent();
     }
 }

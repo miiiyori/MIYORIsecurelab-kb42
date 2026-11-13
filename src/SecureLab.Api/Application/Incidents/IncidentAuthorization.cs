@@ -30,12 +30,13 @@ public sealed class IncidentAuthorizationHandler
 
         var isOwner = incident.OwnerUserId == userId;
         var isAnalyst = context.User.IsInRole(DbSeeder.AnalystRole);
+        var isReporter = context.User.IsInRole(DbSeeder.ReporterRole);
 
         var allowed = requirement.Name switch
         {
             nameof(IncidentOperations.Read) => isOwner || isAnalyst,
-            nameof(IncidentOperations.Update) => isOwner,
-            nameof(IncidentOperations.Delete) => isOwner,
+            nameof(IncidentOperations.Update) => isOwner && isReporter,
+            nameof(IncidentOperations.Delete) => isOwner && isReporter,
             nameof(IncidentOperations.Triage) => isAnalyst,
             _ => false
         };
