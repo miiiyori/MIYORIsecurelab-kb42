@@ -5,6 +5,8 @@ using SecureLab.Api.Data.Entities;
 using SecureLab.Api.Presentation.Contracts;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace SecureLab.Api.Presentation.Endpoints;
 
@@ -42,6 +44,12 @@ public static class IncidentEndpoints
             .WithName("DeleteIncident")
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound);
+
+        group.MapPost("/{id:guid}/triage", TriageAsync)
+            .WithName("TriageIncident")
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
 
         var commentsGroup = endpoints.MapGroup("/api/incident-comments")
             .WithTags("Incident Comments")
@@ -285,5 +293,70 @@ public static class IncidentEndpoints
             comment.CreatedAtUtc);
 
         return Results.Ok(response);
+    }
+    private static async Task<IResult> TriageAsync(
+        Guid id,
+        TriageIncidentRequest request,
+        HttpContext httpContext,
+        SecureLabDbContext db,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("IncidentEndpoints");
+
+        var incident = await db.Incidents
+            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+
+        if (incident is null)
+        {
+            return Results.Problem(title: "Інцидент не знайдено", statusCode: StatusCodes.Status404NotFound);
+        }
+
+        // ПЕРЕВІРКА ПРАВ: тільки аналітик
+        if (!httpContext.User.IsInRole(DbSeeder.AnalystRole))
+        {
+            // А-09, запис безпечного аудити при відмові
+            logger.LogWarning(
+                "authorization.denied subject={SubjectId} action={Action} resource={ResourceId} result={Result} occurredAtUtc={OccurredAtUtc:O} traceId={TraceId}",
+                httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier),
+                "incident.triage",
+                incident.Id,
+                "denied",
+                DateTimeOffset.UtcNow,
+                Activity.Current?.Id ?? httpContext.TraceIdentifier);
+
+            return Results.Forbid();
+        }
+
+        // ПЕРЕВІРКА СТАНУ: тільки New -> Triaged
+        if (incident.Status != IncidentStatus.New)
+        {
+            return Results.Problem(
+                title: "Неприпустимий перехід",
+                detail: "Тільки інциденти зі статусом New можна перевести в Triaged.",
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var note = string.IsNullOrWhiteSpace(request.Note) ? "Первинну оцінку завершено." : request.Note.Trim();
+
+        var history = new IncidentStatusHistory
+        {
+            Id = Guid.NewGuid(),
+            IncidentId = incident.Id,
+            ChangedByUserId = Guid.Parse(httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier)!),
+            OldStatus = incident.Status,
+            NewStatus = IncidentStatus.Triaged,
+            Note = note,
+            CreatedAtUtc = now
+        };
+
+        incident.Status = IncidentStatus.Triaged;
+        incident.UpdatedAtUtc = now;
+
+        db.IncidentStatusHistory.Add(history);
+        await db.SaveChangesAsync(cancellationToken);
+
+        return Results.NoContent();
     }
 }
