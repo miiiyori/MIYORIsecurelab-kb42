@@ -43,7 +43,7 @@ Alice читає свій інцидент і отримує 200. Далі я з
 
 ## Виправлення та retest
 
-Fixed commit: `777f3600eeefa5d12e2c7e3148a638c879f7e0bf`.
+Fixed commit: `6b4a0de8ae1645f8358e89d6a0131f42c9bbbb40`.
 
 Після виправлення ті самі запити дають:
 
@@ -151,7 +151,7 @@ Fixed commit: `777f3600eeefa5d12e2c7e3148a638c879f7e0bf`.
 - Команди: `docker compose --env-file infra/.env.example -f infra/compose.yaml up -d --wait`, потім `dotnet run --project src/SecureLab.Api -- --reset-database`, потім `dotnet test tests/SecureLab.Api.Tests/SecureLab.Api.Tests.csproj --configuration Release`.
 - Результат: `total: 45; failed: 0; succeeded: 45`. Перед цим тести проходили поступово: 24, 26, 33, 35, 37.
 - Ручні запити після reset дали 200, 403, 200, 401 (рис. 3).
-- Hash тега `v0.4.0` (він же fixed commit): `777f3600eeefa5d12e2c7e3148a638c879f7e0bf`.
+- Hash тега `v0.4.0` (він же fixed commit): `6b4a0de8ae1645f8358e89d6a0131f42c9bbbb40`.
 - Гілка `lab/4-authorization`, посилання на репозиторій: `https://github.com/miiiyori/MIYORIsecurelab-kb42`.
 - Не виконувалось: A-08b, A-10, A-11, перевірка одночасних переходів.
 
