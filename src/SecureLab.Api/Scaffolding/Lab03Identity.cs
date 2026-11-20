@@ -3,6 +3,7 @@ using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
+using SecureLab.Api.Security;
 namespace SecureLab.Api.Scaffolding;
 
 public static class Lab03Identity
@@ -39,6 +40,18 @@ public static class Lab03Identity
             options.AddPolicy("login", httpContext =>
                 RateLimitPartition.GetFixedWindowLimiter(
                     partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    factory: _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 10,
+                        Window = TimeSpan.FromSeconds(10),
+                        QueueLimit = 0
+                    }));
+            // ЛР 6: ліміт пошуку. ключ partition = id автентифікованого користувача (перевірена identity),
+            // а не IP і не довільний header: IP може бути спільним, header клієнт підробляє
+            options.AddPolicy("search", httpContext =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier)
+                        ?? "ip:" + (httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
                     factory: _ => new FixedWindowRateLimiterOptions
                     {
                         PermitLimit = 10,
@@ -107,7 +120,7 @@ public static class Lab03Identity
         {
             await signIn.SignOutAsync();
             return Results.NoContent();
-        });
+        }).RequireAuthorization().RequireAntiforgery(); // токен перевіряється ДО SignOutAsync
         // в /api/me прибираємо X-Demo-UserId, беремо ID з кукі та додаємо RequireAuthorization()
         app.MapGet("/api/me", async (HttpContext context, SecureLabDbContext db) =>
         {

@@ -3,6 +3,7 @@ using SecureLab.Api.Application.Incidents;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 using SecureLab.Api.Presentation.Contracts;
+using SecureLab.Api.Security;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
@@ -35,17 +36,20 @@ public static class IncidentEndpoints
             .ProducesValidationProblem();
 
         group.MapPut("/{id:guid}", UpdateAsync)
+            .RequireAntiforgery()
             .WithName("UpdateIncident")
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapDelete("/{id:guid}", DeleteAsync)
+            .RequireAntiforgery()
             .WithName("DeleteIncident")
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapPost("/{id:guid}/triage", TriageAsync)
+            .RequireAntiforgery()
             .WithName("TriageIncident")
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
@@ -363,6 +367,20 @@ public static class IncidentEndpoints
         incident.UpdatedAtUtc = now;
 
         await db.SaveChangesAsync(cancellationToken);
+
+        // ЛР 6: audit event успішного привілейованого переходу Incident.Status
+        // поля: subject, action, resource, result, час, trace. без note, cookie, token і тіла запиту
+        logger.LogInformation(
+            "audit.status_transition subject={SubjectId} action={Action} resource={ResourceId} from={OldStatus} to={NewStatus} result={Result} occurredAtUtc={OccurredAtUtc:O} traceId={TraceId}",
+            httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier),
+            "incident.triage",
+            incident.Id,
+            IncidentStatus.New,
+            IncidentStatus.Triaged,
+            "success",
+            now,
+            Activity.Current?.Id ?? httpContext.TraceIdentifier);
+
         return Results.NoContent();
     }
 }

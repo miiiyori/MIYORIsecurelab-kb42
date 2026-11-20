@@ -57,6 +57,7 @@ document.querySelector("#login").addEventListener("submit", async event => {
     result.textContent = `Login: ${response.status}`;
 
     if (response.status === 204) {
+        SecureLabCsrf.reset();   // новий principal: токен одержуємо знову перед першою зміною
         await loadProfile();
     }
 });
@@ -76,7 +77,7 @@ document.querySelector("#incident").addEventListener("submit", async event => {
         occurredAtUtc: new Date(data.get("occurredAtUtc")).toISOString()
     };
 
-    const response = await fetch("/api/incidents", {
+    const response = await SecureLabCsrf.mutate("/api/incidents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(dto)
@@ -87,12 +88,13 @@ document.querySelector("#incident").addEventListener("submit", async event => {
 
 // 4. LOGOUT
 document.querySelector("#logout").addEventListener("click", async () => {
-    const response = await fetch("/api/auth/logout", { method: "POST" });
+    const response = await SecureLabCsrf.mutate("/api/auth/logout", { method: "POST" });
 
     if (response.status !== 204) {
         result.textContent = `Logout: ${response.status}`;  // вихід не вдався, нічого не чистимо
         return;
     }
+    SecureLabCsrf.reset();                                  // токен попереднього користувача більше недійсний
 
     document.querySelector("#incident").reset();            // прибираємо введене у формі інциденту
     clearProfile();

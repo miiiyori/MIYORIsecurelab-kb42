@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using SecureLab.Api.Data;
 using SecureLab.Api.Data.Entities;
 using System.Security.Claims;
+using SecureLab.Api.Security;
 
 namespace SecureLab.Api.Scaffolding;
 
@@ -13,12 +14,25 @@ public static class Lab02Endpoints
         app.MapGet("/api/incidents/search", async (
             string? q,
             string? sortBy,
+            HttpContext httpContext,
             SecureLabDbContext db,
             CancellationToken ct) =>
         {
+            // F-01: пошук мусить мати ті самі межі доступу, що й список /api/incidents
+            // Administrator прав на Incident не має (матриця доступу), тому 403
+            if (httpContext.User.IsInRole(DbSeeder.AdministratorRole))
+                return Results.Forbid();
+            if (!Guid.TryParse(httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier), out var subjectId))
+                return Results.Unauthorized();
+            var seeAll = httpContext.User.IsInRole(DbSeeder.AnalystRole);
+
             // збираємо патерн для пошуку. якщо q пусте, шукаємо просто "%%", тобто все підряд
             var pattern = "%" + EscapeLike(q ?? "") + "%";
-            var found = db.Incidents.AsNoTracking().Where(item => EF.Functions.ILike(item.Title, pattern, "\\")
+            // фільтруємо по власнику одразу в запиті, щоб чужі записи взагалі не тягнулися з бази
+            IQueryable<Incident> visible = db.Incidents.AsNoTracking();
+            if (!seeAll)
+                visible = visible.Where(item => item.OwnerUserId == subjectId);
+            var found = visible.Where(item => EF.Functions.ILike(item.Title, pattern, "\\")
             || EF.Functions.ILike(item.Description, pattern, "\\"));
             
             // sortBy обирає лише одну з написаних гілок
@@ -53,7 +67,7 @@ public static class Lab02Endpoints
                 item.Id, item.Title, item.Description, item.Severity.ToString(), item.Status.ToString(), item.CreatedAtUtc))
             .ToListAsync(ct);
             return Results.Ok(items);
-        });
+        }).RequireAuthorization().RequireRateLimiting("search");
 
         app.MapPost("/api/incidents", async (
             CreateIncidentRequest request,
@@ -138,7 +152,7 @@ public static class Lab02Endpoints
                 incident.Id, incident.Title, incident.Severity.ToString(),
                 incident.Status.ToString(), incident.OccurredAtUtc, incident.CreatedAtUtc);
             return Results.Created($"/api/incidents/{incident.Id}", response);
-        }).RequireAuthorization();
+        }).RequireAuthorization().RequireAntiforgery();
     }
     // екрануємо спецсимволи postgresql слеш/підкреслення/відсоток, щоб вони шукалися як звичайні букви 
     private static string EscapeLike(string value) => value.Replace("\\", "\\\\").Replace("_", "\\_").Replace("%", "\\%");
