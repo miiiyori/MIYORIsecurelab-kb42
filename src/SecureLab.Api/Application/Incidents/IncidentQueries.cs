@@ -8,12 +8,19 @@ namespace SecureLab.Api.Application.Incidents;
 public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<IncidentQueries> logger)
 {
     public async Task<IReadOnlyList<IncidentListItemResponse>> GetListAsync(
-        IncidentStatus? status,
-        CancellationToken cancellationToken)
+    IncidentStatus? status,
+    Guid ownerId,
+    bool seeAll,
+    CancellationToken cancellationToken)
     {
         logger.LogInformation("Loading incidents with status filter {Status}", status);
-
         var query = dbContext.Incidents.AsNoTracking();
+        // обмеження входить прямо в запит, чужі рядки з бази навіть не читаються
+        if (!seeAll)
+        {
+            query = query.Where(incident => incident.OwnerUserId == ownerId);
+        }
+
         if (status is not null)
         {
             query = query.Where(incident => incident.Status == status);
@@ -30,8 +37,16 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
                 incident.CreatedAtUtc))
             .ToListAsync(cancellationToken);
     }
+    // Entity для рішення авторизації (потрібен OwnerUserId), без проєкції
+    public Task<Incident?> FindAsync(Guid id, CancellationToken cancellationToken) =>
+        dbContext.Incidents
+            .AsNoTracking()
+            .SingleOrDefaultAsync(incident => incident.Id == id, cancellationToken);
 
-    public Task<IncidentDetailsResponse?> GetDetailsAsync(Guid id, CancellationToken cancellationToken)
+    public Task<IncidentDetailsResponse?> GetDetailsAsync(
+        Guid id,
+        bool includeInternal,
+        CancellationToken cancellationToken)
     {
         logger.LogInformation("Loading incident {IncidentId}", id);
 
@@ -48,7 +63,7 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
                 incident.CreatedAtUtc,
                 incident.Owner.DisplayName,
                 incident.Comments
-                    .Where(comment => !comment.IsInternal)
+                    .Where(comment => includeInternal || !comment.IsInternal)
                     .OrderBy(comment => comment.CreatedAtUtc)
                     .Select(comment => new IncidentCommentResponse(
                         comment.Id,
@@ -58,29 +73,33 @@ public sealed class IncidentQueries(SecureLabDbContext dbContext, ILogger<Incide
                     .ToList()))
             .SingleOrDefaultAsync(cancellationToken);
     }
+
     private static readonly IReadOnlyList<IncidentSeverity> SeverityDisplayOrder =
         [IncidentSeverity.Critical, IncidentSeverity.High, IncidentSeverity.Medium, IncidentSeverity.Low];
+
     public async Task<IReadOnlyList<IncidentSeveritySummaryResponse>> GetSeveritySummaryAsync(
         IncidentStatus? status,
         CancellationToken cancellationToken)
-    { logger.LogInformation("Computing severity summary with status filter {Status}", status);
+    {
+        logger.LogInformation("Computing severity summary with status filter {Status}", status);
         var query = dbContext.Incidents.AsNoTracking();
         if (status is not null)
         {
             query = query.Where(incident => incident.Status == status);
         }
-    var countsBySeverity = await query
+
+        var countsBySeverity = await query
             .GroupBy(incident => incident.Severity)
-            .Select(group => new {Severity = group.Key, Count = group.Count() })
+            .Select(group => new { Severity = group.Key, Count = group.Count() })
             .ToListAsync(cancellationToken);
 
-    var lookup = countsBySeverity.ToDictionary(x=>x.Severity, x => x.Count);
+        var lookup = countsBySeverity.ToDictionary(x => x.Severity, x => x.Count);
 
         var result = SeverityDisplayOrder
-                .Select(severity => new IncidentSeveritySummaryResponse(
-                    severity.ToString(),
-                    lookup.GetValueOrDefault(severity)))
-                .ToList();
+            .Select(severity => new IncidentSeveritySummaryResponse(
+                severity.ToString(),
+                lookup.GetValueOrDefault(severity)))
+            .ToList();
 
         logger.LogInformation("Severity summary produced {GroupCount} groups", result.Count);
         return result;
